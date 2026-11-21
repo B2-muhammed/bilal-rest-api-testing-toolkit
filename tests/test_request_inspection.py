@@ -7,6 +7,7 @@ from main import inspect_request
 
 
 @patch("main.requests.request")
+def test_get_request_inspection(mock_request):
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.url = "https://httpbin.org/anything"

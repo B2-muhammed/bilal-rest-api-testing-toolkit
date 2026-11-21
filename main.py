@@ -1,18 +1,20 @@
+"""A small CLI tool for inspecting HTTP requests with httpbin.org."""
+
 import argparse
+import json
+import sys
 import time
+from typing import Any
 
 import requests
 
 
-def inspect_request(
-    method,
-    url,
-    params=None,
-    headers=None,
-    json_body=None,
-    timeout=10,
-):
-    start_time = time.perf_counter()
+DEFAULT_URL = "https://httpbin.org/anything"
+
+
+def inspect_request( method: str, url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None, json_body: Any | None = None, timeout: float = 10, ) -> dict[str, Any]:
+    """Send an HTTP request and return a concise inspection result."""
+    started = time.perf_counter()
 
     response = requests.request(
         method=method.upper(),
@@ -23,12 +25,11 @@ def inspect_request(
         timeout=timeout,
     )
 
-    elapsed_ms = (time.perf_counter() - start_time) * 1000
-
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
     response.raise_for_status()
 
     try:
-        body = response.json()
+        body: Any = response.json()
     except ValueError:
         body = response.text
 
@@ -36,55 +37,70 @@ def inspect_request(
         "status_code": response.status_code,
         "method": method.upper(),
         "url": response.url,
-        "elapsed_ms": round(elapsed_ms, 2),
+        "response_time_ms": elapsed_ms,
         "body": body,
     }
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Python HTTP request inspection toolkit"
+        description="Send an HTTP request and inspect the response."
     )
-
     parser.add_argument(
         "--method",
         default="GET",
         choices=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        help="HTTP method (default: GET)",
     )
     parser.add_argument(
         "--url",
-        default="https://httpbin.org/anything",
+        default=DEFAULT_URL,
+        help=f"Request URL (default: {DEFAULT_URL})",
     )
-    parser.add_argument("--json", dest="json_body")
-    parser.add_argument("--timeout", type=float, default=10)
+    parser.add_argument(
+        "--json",
+        dest="json_body",
+        help="JSON request body, supplied as a JSON string",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=10,
+        help="Request timeout in seconds (default: 10)",
+    )
+    return parser
 
-    args = parser.parse_args()
+
+def main() -> int:
+    args = build_parser().parse_args()
 
     try:
-        import json
-
         payload = json.loads(args.json_body) if args.json_body else None
-
         result = inspect_request(
-            method=args.method,
-            url=args.url,
+            args.method,
+            args.url,
             json_body=payload,
             timeout=args.timeout,
         )
+    except json.JSONDecodeError as exc:
+        print(f"Invalid JSON: {exc}", file=sys.stderr)
+        return 2
+    except requests.Timeout:
+        print("Request timed out.", file=sys.stderr)
+        return 1
+    except requests.ConnectionError:
+        print("Could not connect to the server.", file=sys.stderr)
+        return 1
+    except requests.HTTPError as exc:
+        print(f"HTTP error: {exc}", file=sys.stderr)
+        return 1
+    except requests.RequestException as exc:
+        print(f"Request failed: {exc}", file=sys.stderr)
+        return 1
 
-        print(json.dumps(result, indent=4))
-
-    except requests.exceptions.Timeout:
-        print("Error: The request timed out.")
-    except requests.exceptions.ConnectionError:
-        print("Error: Could not connect to the server.")
-    except requests.exceptions.HTTPError as error:
-        print(f"HTTP error: {error}")
-    except requests.exceptions.RequestException as error:
-        print(f"Request error: {error}")
-    except ValueError as error:
-        print(f"Invalid JSON: {error}")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
